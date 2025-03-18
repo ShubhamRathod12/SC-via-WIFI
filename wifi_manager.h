@@ -1,5 +1,5 @@
-#ifndef WIFIMANAGER_H
-#define WIFIMANAGER_H
+#ifndef WIFI_MANAGER_H
+#define WIFI_MANAGER_H
 
 #include <QObject>
 #include <QStringList>
@@ -11,15 +11,15 @@ class WiFiManager : public QObject {
 public:
     explicit WiFiManager(QObject *parent = nullptr);
     QStringList wifiNetworks() const;
-
-public slots:
-    void scanNetworks();
+    Q_INVOKABLE void scanNetworks();
+    Q_INVOKABLE void connectToWiFi(const QString &ssid, const QString &password);
 
 signals:
     void wifiNetworksChanged();
+    void connectionStatusChanged(bool success, QString message);
 
 private:
     QStringList m_wifiNetworks;
 };
 
-#endif // WIFIMANAGER_H
+#endif // WIFI_MANAGER_H
