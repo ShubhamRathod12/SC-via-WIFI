@@ -1,6 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 
+
+
 ApplicationWindow {
     visible: true
     width: 400
@@ -32,8 +34,8 @@ ApplicationWindow {
                     anchors.fill: parent
 
                     Rectangle {
-                        width: parent.width * 0.6
-                        height: 40
+                        width: 80
+                        height: 30
                         color: "#f0f0f0"
                         border.color: "#888"
                         radius: 5
@@ -46,9 +48,18 @@ ApplicationWindow {
 
                     Button {
                         text: "Connect"
+                        enabled: connectedSSID !== modelData  // Disable if already connected
                         onClicked: {
                             selectedSSID = modelData;
                             wifiPasswordDialog.visible = true;
+                        }
+                    }
+
+                    Button {
+                        text: "Disconnect"
+                        visible: connectedSSID === modelData  // Show only if connected
+                        onClicked: {
+                            wifiManager.disconnectFromWiFi();
                         }
                     }
                 }
@@ -104,11 +115,17 @@ ApplicationWindow {
     Connections {
         target: wifiManager
         function onConnectionStatusChanged(success, message) {
-            messageText.text = message; //Correct way to update the dialog message
+            messageText.text = message;
             messageDialog.visible = true;
+
+            if (success) {
+                connectedSSID = selectedSSID; // Store the connected WiFi SSID
+            } else {
+                connectedSSID = ""; //Clear if connection failed
+            }
         }
     }
 
-
     property string selectedSSID: ""
+    property string connectedSSID: ""  // Track connected WiFi SSID
 }

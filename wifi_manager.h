@@ -13,10 +13,13 @@ public:
     QStringList wifiNetworks() const;
     Q_INVOKABLE void scanNetworks();
     Q_INVOKABLE void connectToWiFi(const QString &ssid, const QString &password);
+    Q_INVOKABLE void disconnectFromWiFi();
 
 signals:
     void wifiNetworksChanged();
     void connectionStatusChanged(bool success, QString message);
+
+
 
 private:
     QStringList m_wifiNetworks;
