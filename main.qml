@@ -15,7 +15,7 @@ ApplicationWindow {
 
         // Scan WiFi Button
         Button {
-            text: "Scan WiFi"
+            text: "🔄"
             onClicked: wifiManager.scanNetworks()
         }
 
@@ -65,6 +65,11 @@ ApplicationWindow {
                 }
             }
         }
+
+        Component.onCompleted: {
+            wifiManager.scanNetworks();  // Auto scan when screen opens
+        }
+
     }
 
     // Password Input Dialog

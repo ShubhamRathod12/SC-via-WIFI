@@ -1,32 +1,39 @@
+
 #include "wifi_manager.h"
-#include <windows.h>
-#include <wlanapi.h>
-#include <objbase.h>
-#include <wtypes.h>
 #include <QDebug>
 #include <QProcess>
 #include <QFile>
 #include <QDir>
-#include <QRegularExpression>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <wlanapi.h>
+#include <objbase.h>
+#include <wtypes.h>
+//#pragma comment(lib, "wlanapi.lib")
+#endif
 
-#pragma comment(lib, "wlanapi.lib")
-
-
-WiFiManager::WiFiManager(QObject *parent) : QObject(parent) {}
+WiFiManager::WiFiManager(QObject *parent) : QObject(parent) {
+     scanNetworks();
+}
 
 QStringList WiFiManager::wifiNetworks() const {
     return m_wifiNetworks;
 }
 
 void WiFiManager::scanNetworks() {
+    m_wifiNetworks.clear(); // Clear previous scan results
+    QProcess process;
+
+#ifdef _WIN32
     HANDLE hClient = NULL;
     DWORD dwMaxClient = 2;
     DWORD dwCurVersion = 0;
     DWORD dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
 
     if (dwResult != ERROR_SUCCESS) {
-        qDebug() << " WlanOpenHandle failed!";
+        qDebug() << "WlanOpenHandle failed!";
+        emit wifiNetworksChanged();
         return;
     }
 
@@ -34,18 +41,17 @@ void WiFiManager::scanNetworks() {
     PWLAN_AVAILABLE_NETWORK_LIST pBssList = NULL;
 
     if (WlanEnumInterfaces(hClient, NULL, &pIfList) != ERROR_SUCCESS) {
-        qDebug() << " Please Turn On your Wifi!";
+        qDebug() << "Please Turn On your Wifi!";
         WlanCloseHandle(hClient, NULL);
+        emit wifiNetworksChanged();
         return;
     }
 
-    m_wifiNetworks.clear();
-
     for (int i = 0; i < (int)pIfList->dwNumberOfItems; i++) {
-        PWLAN_INTERFACE_INFO pIfInfo = (WLAN_INTERFACE_INFO *)&pIfList->InterfaceInfo[i];
+        PWLAN_INTERFACE_INFO pIfInfo = &pIfList->InterfaceInfo[i];
 
         if (WlanGetAvailableNetworkList(hClient, &pIfInfo->InterfaceGuid, 0, NULL, &pBssList) != ERROR_SUCCESS) {
-            qDebug() << " Please Turn On your Wifi!!";
+            qDebug() << "Please Turn On your Wifi!";
             continue;
         }
 
@@ -63,32 +69,33 @@ void WiFiManager::scanNetworks() {
     WlanFreeMemory(pIfList);
     WlanCloseHandle(hClient, NULL);
 
+#elif defined(__linux__)
+
+    process.start("nmcli", QStringList() << "-t" << "-f" << "SSID" << "dev" << "wifi" << "list");
+    process.waitForFinished();
+
+    QString output = process.readAllStandardOutput();
+    QStringList ssidList = output.split("\n", Qt::SkipEmptyParts);
+
+    for (const QString &ssid : ssidList) {
+        QString trimmedSSID = ssid.trimmed();
+        if (!trimmedSSID.isEmpty()) {
+            m_wifiNetworks.append(trimmedSSID);
+        }
+    }
+
+#endif
+
     emit wifiNetworksChanged();
 }
+
 
 
 void WiFiManager::connectToWiFi(const QString &ssid, const QString &password) {
     QProcess process;
 
-    // 🔹 Step 1: Disconnect from WiFi (prevents old credentials from being reused)
-    process.start("netsh", QStringList() << "wlan" << "disconnect");
-    process.waitForFinished();
-
-    // 🔹 Step 2: Fully remove the existing profile
-    process.start("cmd", QStringList() << "/c" << "netsh wlan delete profile name=\"" + ssid + "\"");
-    process.waitForFinished();
-
-    // 🔹 Step 3: Verify if profile was deleted
-    process.start("netsh", QStringList() << "wlan" << "show" << "profiles");
-    process.waitForFinished();
-    QString profileList = process.readAllStandardOutput();
-    if (profileList.contains(ssid, Qt::CaseInsensitive)) {
-        qDebug() << "Profile still exists! Trying to remove again.";
-        process.start("cmd", QStringList() << "/c" << "netsh wlan delete profile name=\"" + ssid + "\"");
-        process.waitForFinished();
-    }
-
-    // 🔹 Step 4: Create a WiFi profile XML with new password
+#ifdef _WIN32
+    // Windows: Create XML WiFi profile
     QString xmlContent = QString(
                              "<?xml version=\"1.0\"?>"
                              "<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">"
@@ -110,7 +117,7 @@ void WiFiManager::connectToWiFi(const QString &ssid, const QString &password) {
                              "</WLANProfile>"
                              ).arg(ssid, password);
 
-    // 🔹 Step 5: Save XML to a temporary file
+    // Save XML to a temporary file
     QString tempFilePath = QDir::temp().filePath("wifi_profile.xml");
     QFile file(tempFilePath);
     if (file.exists()) {
@@ -125,77 +132,46 @@ void WiFiManager::connectToWiFi(const QString &ssid, const QString &password) {
         return;
     }
 
-    // 🔹 Step 6: Add the profile with the new password
+    // Add profile
     process.start("netsh", QStringList() << "wlan" << "add" << "profile" << "filename=" + tempFilePath << "user=current");
     process.waitForFinished();
 
     // Delete the temporary XML file
-    if (QFile::remove(tempFilePath)) {
-        qDebug() << "Temporary WiFi profile file removed successfully.";
-    } else {
-        qDebug() << "Failed to remove WiFi profile file.";
-    }
+    QFile::remove(tempFilePath);
 
-    // 🔹 Step 7: Try to connect using the new password
+    // Connect to WiFi
     process.start("netsh", QStringList() << "wlan" << "connect" << "name=" + ssid);
     process.waitForFinished();
 
-    // 🔹 Step 8: Handle connection success/failure
+#elif defined(__linux__)
+    // Linux: Use nmcli to connect
+    process.start("nmcli", QStringList() << "device" << "wifi" << "connect" << ssid << "password" << password);
+    process.waitForFinished();
+#endif
+
+    // Handle connection result
     QString output = process.readAllStandardOutput();
     QString errorOutput = process.readAllStandardError();
     qDebug() << "WiFi Connection Output:" << output;
     qDebug() << "WiFi Connection Errors:" << errorOutput;
 
-    if (output.contains("completed successfully", Qt::CaseInsensitive)) {
+    if (output.contains("successfully", Qt::CaseInsensitive) || output.contains("completed successfully", Qt::CaseInsensitive)) {
         emit connectionStatusChanged(true, "Connected to " + ssid);
     } else {
-        emit connectionStatusChanged(false, "Incorrect password or failed to connect.\nError: " + errorOutput);
+        emit connectionStatusChanged(false, "Failed to connect to WiFi.\nError: " + errorOutput);
     }
 }
 
-// void WiFiManager::disconnectFromWiFi() {
-//     QProcess process;
-
-
-//     process.start("netsh wlan show interfaces");
-//     process.waitForFinished();
-//     QString output = process.readAllStandardOutput();
-//     qDebug() << "Raw netsh Output:\n" << output;
 
 
 
-//     QString interfaces;
-//     QRegularExpression regex(R"(Name\s*:\s*([^\r\n]+))");
-//     QRegularExpressionMatch match = regex.match(output);
 
-//     if (match.hasMatch()) {
-//         interfaces = match.captured(1).trimmed();
-//         qDebug() << "Extracted Interface Name:" << interfaces;
-//     }
+// nXon@0987
 
-//     if (interfaces.isEmpty()) {
-//         qDebug() << " Failed to detect WiFi interface!";
-//         emit connectionStatusChanged(false, "Failed to detect WiFi interface.");
-//         return;
-//     }
-
-
-//     process.start("netsh", QStringList() << "wlan" << "disconnect" << "interface=" + interfaces);
-//     process.waitForFinished();
-
-//     QString disconnectOutput = process.readAllStandardOutput();
-//     QString errorOutput = process.readAllStandardError();
-//     qDebug() << "WiFi Disconnect Output:\n" << disconnectOutput;
-//     qDebug() << "WiFi Disconnect Errors:\n" << errorOutput;
-
-//     if (disconnectOutput.contains("disconnected", Qt::CaseInsensitive)) {
-//         emit connectionStatusChanged(false, "Disconnected from WiFi");
-//     } else {
-//         emit connectionStatusChanged(false, "Failed to disconnect");
-//     }
-// }
 
 void WiFiManager::disconnectFromWiFi() {
+#ifdef _WIN32
+
     HANDLE hClient = NULL;
     DWORD dwMaxClient = 2;
     DWORD dwCurVersion = 0;
@@ -229,7 +205,7 @@ void WiFiManager::disconnectFromWiFi() {
     PWLAN_INTERFACE_INFO pIfInfo = &pIfList->InterfaceInfo[0];
     GUID interfaceGuid = pIfInfo->InterfaceGuid;
 
-    // 🔹 Disconnect from WiFi
+    //  Disconnect from WiFi
     dwResult = WlanDisconnect(hClient, &interfaceGuid, NULL);
 
     if (dwResult == ERROR_SUCCESS) {
@@ -240,8 +216,23 @@ void WiFiManager::disconnectFromWiFi() {
         emit connectionStatusChanged(false, "Failed to disconnect from WiFi.");
     }
 
-    // Free resources
+    // Free resourc
     WlanFreeMemory(pIfList);
     WlanCloseHandle(hClient, NULL);
+
+#else
+    QProcess process;
+    process.start("nmcli device disconnect wlpls0");  // Change wlan0 to your interface
+    process.waitForFinished();
+
+    QString output = process.readAllStandardOutput();
+    QString errorOutput = process.readAllStandardError();
+
+    if (output.contains("successfully disconnected", Qt::CaseInsensitive)) {
+        emit connectionStatusChanged(false, "Disconnected from WiFi.");
+    } else {
+        emit connectionStatusChanged(false, "Failed to disconnect.");
+    }
+#endif
 }
-// nXon@0987
+
