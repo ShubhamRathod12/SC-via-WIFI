@@ -4,6 +4,7 @@
 #include <QProcess>
 #include <QFile>
 #include <QDir>
+#include <QRegularExpression>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -14,12 +15,17 @@
 #endif
 
 WiFiManager::WiFiManager(QObject *parent) : QObject(parent) {
+    timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, &WiFiManager::scanNetworks);
+    timer->start(5000);
      scanNetworks();
 }
 
 QStringList WiFiManager::wifiNetworks() const {
     return m_wifiNetworks;
 }
+
+
 
 void WiFiManager::scanNetworks() {
     m_wifiNetworks.clear(); // Clear previous scan results
@@ -89,7 +95,45 @@ void WiFiManager::scanNetworks() {
     emit wifiNetworksChanged();
 }
 
+QString WiFiManager::getConnectedSSID() {
+    QProcess process;
+#ifdef _WIN32
+    process.start("netsh", QStringList() << "wlan" << "show" << "interfaces");
+#else
+    process.start("nmcli", QStringList() << "-t" << "-f" << "active,ssid" << "connection" << "show");
+#endif
+    process.waitForFinished();
 
+    QString output = process.readAllStandardOutput();
+    QString ssid;
+
+#ifdef _WIN32
+    QRegularExpression regex("SSID\\s*:\\s*([^\\r\\n]*)");
+    QRegularExpressionMatch match = regex.match(output);
+    if (match.hasMatch()) {
+        ssid = match.captured(1).trimmed();
+    }
+#else
+    QStringList lines = output.split("\n", Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        if (line.startsWith("yes:")) {
+            ssid = line.section(":", 1, 1).trimmed();
+            break;
+        }
+    }
+#endif
+
+    m_connectedSSID = ssid;
+    emit connectedSSIDChanged();
+
+    if (!ssid.isEmpty()) {
+        qDebug() << "Connected WiFi SSID:" << ssid;
+    } else {
+        qDebug() << "No WiFi connection detected.";
+    }
+
+    return ssid;
+}
 
 void WiFiManager::connectToWiFi(const QString &ssid, const QString &password) {
     QProcess process;
@@ -160,6 +204,14 @@ void WiFiManager::connectToWiFi(const QString &ssid, const QString &password) {
     } else {
         emit connectionStatusChanged(false, "Failed to connect to WiFi.\nError: " + errorOutput);
     }
+
+    // bool isConnected = output.contains("Connected", Qt::CaseInsensitive);
+
+    // if (isConnected) {
+    //     emit connectionStatusChanged(true, "WiFi is already connected.");
+    // } else {
+    //     emit connectionStatusChanged(false, "No active WiFi connection found.");
+    // }
 }
 
 

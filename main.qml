@@ -1,8 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 
-
-
 ApplicationWindow {
     visible: true
     width: 400
@@ -13,10 +11,22 @@ ApplicationWindow {
         anchors.centerIn: parent
         spacing: 10
 
+        Text {
+            id: connectionStatus
+            font.pixelSize: 18
+            color: connectedSSID !== "" ? "green" : "red"
+            text: connectedSSID !== "" ? "Connected: " + connectedSSID : "No active WiFi connection"
+        }
+
+        Component.onCompleted: {
+            connectedSSID = wifiManager.getConnectedSSID();
+        }
+
         // Scan WiFi Button
         Button {
             text: "🔄"
-            onClicked: wifiManager.scanNetworks()
+           // onClicked: wifiManager.scanNetworks()
+            onClicked: wifiManager.getConnectedSSID()
         }
 
         // WiFi List View
@@ -34,7 +44,7 @@ ApplicationWindow {
                     anchors.fill: parent
 
                     Rectangle {
-                        width: 80
+                        width: 120
                         height: 30
                         color: "#f0f0f0"
                         border.color: "#888"
@@ -66,10 +76,9 @@ ApplicationWindow {
             }
         }
 
-        Component.onCompleted: {
-            wifiManager.scanNetworks();  // Auto scan when screen opens
-        }
-
+        // Component.onCompleted: {
+        //     wifiManager.checkWiFiStatus(); // Check WiFi connection on startup
+        // }
     }
 
     // Password Input Dialog
@@ -119,14 +128,14 @@ ApplicationWindow {
     // Update the message correctly in Connections
     Connections {
         target: wifiManager
-        function onConnectionStatusChanged(success, message) {
+        function onConnectionStatusChanged(success, message, ssid) {
             messageText.text = message;
             messageDialog.visible = true;
 
             if (success) {
-                connectedSSID = selectedSSID; // Store the connected WiFi SSID
+                connectedSSID = ssid;  // Store the connected WiFi SSID
             } else {
-                connectedSSID = ""; //Clear if connection failed
+                connectedSSID = ""; // Clear if connection failed
             }
         }
     }
